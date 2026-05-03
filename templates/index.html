@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -37,7 +37,7 @@
     .sub { color: var(--muted); margin: 0; }
     .row {
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: 1fr 1fr auto;
       gap: 10px;
       align-items: end;
     }
@@ -75,6 +75,13 @@
       white-space: normal;
       overflow-wrap: anywhere;
     }
+    .kpi-list {
+      margin: 8px 0 0;
+      padding-left: 18px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .kpi-list li { margin-bottom: 4px; }
     .grid-2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -93,6 +100,69 @@
       overflow-wrap: anywhere;
     }
     .status { min-height: 22px; color: var(--muted); }
+    .visual-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+    }
+    .visual-card {
+      border: 1px solid #dce7f7;
+      border-radius: 10px;
+      background: #f8fbff;
+      padding: 10px;
+    }
+    .visual-card h4 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .visual-card img {
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid #edf1f7;
+      display: block;
+      cursor: zoom-in;
+    }
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 18, 35, 0.82);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 9999;
+    }
+    .lightbox.open { display: flex; }
+    .lightbox-content {
+      position: relative;
+      width: min(96vw, 1280px);
+      max-height: 92vh;
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px;
+      border: 1px solid #d6e0ef;
+    }
+    .lightbox-close {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      border: none;
+      background: #12243a;
+      color: #fff;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .lightbox img {
+      width: 100%;
+      max-height: calc(92vh - 40px);
+      object-fit: contain;
+      display: block;
+      border-radius: 8px;
+      border: 1px solid #edf1f7;
+    }
     pre {
       background: #0f1724;
       color: #dbe7ff;
@@ -121,6 +191,10 @@
           <label for="startDate">Start Date</label>
           <input id="startDate" type="date" />
         </div>
+        <div>
+          <label for="endDate">End Date</label>
+          <input id="endDate" type="date" />
+        </div>
         <button id="refreshBtn" style="background:#334e72;">Refresh Results</button>
       </div>
       <p id="status" class="status"></p>
@@ -130,7 +204,19 @@
       <div class="kpi"><div class="label">Total Requests</div><div id="kpiTotal" class="value">-</div></div>
       <div class="kpi"><div class="label">Boroughs</div><div id="kpiBoroughs" class="value">-</div></div>
       <div class="kpi"><div class="label">Top Complaint Count</div><div id="kpiTopCount" class="value">-</div></div>
-      <div class="kpi"><div class="label">Top Complaint Type</div><div id="kpiTopType" class="value" style="font-size:18px;">-</div></div>
+      <div class="kpi">
+        <div class="label">
+          Top Complaint Types
+          <select id="topNSelect" style="margin-left:8px;">
+            <option value="1">Top 1</option>
+            <option value="2">Top 2</option>
+            <option value="3" selected>Top 3</option>
+            <option value="4">Top 4</option>
+            <option value="5">Top 5</option>
+          </select>
+        </div>
+        <div id="kpiTopType" class="value" style="font-size:16px;">-</div>
+      </div>
     </div>
 
     <div class="grid-2">
@@ -162,10 +248,37 @@
       <div id="complaintsTable"></div>
     </div>
 
+    <div class="panel">
+      <h3>Generated Visualizations</h3>
+      <div id="visualsGrid" class="visual-grid"></div>
+    </div>
+
+  </div>
+  <div id="lightbox" class="lightbox" aria-hidden="true">
+    <div class="lightbox-content">
+      <button id="lightboxClose" class="lightbox-close" type="button">Close</button>
+      <img id="lightboxImage" src="" alt="Visualization preview" />
+    </div>
   </div>
 
   <script>
-    const state = { charts: {} };
+    const state = { charts: {}, lastPayload: null };
+    const lightbox = document.getElementById("lightbox");
+    const lightboxImage = document.getElementById("lightboxImage");
+    const lightboxClose = document.getElementById("lightboxClose");
+
+    function openLightbox(src, alt) {
+      lightboxImage.src = src;
+      lightboxImage.alt = alt || "Visualization preview";
+      lightbox.classList.add("open");
+      lightbox.setAttribute("aria-hidden", "false");
+    }
+
+    function closeLightbox() {
+      lightbox.classList.remove("open");
+      lightbox.setAttribute("aria-hidden", "true");
+      lightboxImage.src = "";
+    }
 
     function fmt(value) {
       if (value === null || value === undefined || value === "") return "-";
@@ -205,11 +318,19 @@
     }
 
     function renderResults(payload) {
-      const { summary, datasets } = payload;
+      state.lastPayload = payload;
+      const { summary, datasets, visuals } = payload;
       document.getElementById("kpiTotal").textContent = fmt(summary.total_requests);
       document.getElementById("kpiBoroughs").textContent = fmt(summary.boroughs);
       document.getElementById("kpiTopCount").textContent = fmt(summary.top_complaint_count);
-      document.getElementById("kpiTopType").textContent = fmt(summary.top_complaint_type);
+      const topN = Number(document.getElementById("topNSelect").value || 3);
+      const topList = (summary.top_complaints || []).slice(0, topN);
+      const topTypeEl = document.getElementById("kpiTopType");
+      if (!topList.length) {
+        topTypeEl.textContent = "-";
+      } else {
+        topTypeEl.innerHTML = `<ol class="kpi-list">${topList.map(item => `<li>${fmt(item.complaint_type)} (${fmt(item.count)})</li>`).join("")}</ol>`;
+      }
 
       const borough = datasets.borough_counts.rows || [];
       renderTable("boroughTable", borough);
@@ -231,6 +352,18 @@
       const complaints = datasets.top_complaints.rows || [];
       renderTable("complaintsTable", complaints);
       upsertChart("complaints", "complaintsChart", "bar", complaints.map(r => r.complaint_type), complaints.map(r => r.count), "Count");
+
+      const visualRoot = document.getElementById("visualsGrid");
+      if (!visuals || visuals.length === 0) {
+        visualRoot.innerHTML = "<p>No PNG visualizations found. Run the pipeline first.</p>";
+      } else {
+        visualRoot.innerHTML = visuals.map(v => (
+          `<div class="visual-card"><h4>${v.name.replace(/\.png$/i, "").replace(/_/g, " ")}</h4><img class="visual-thumb" src="${v.url}?t=${Date.now()}" data-full="${v.url}?t=${Date.now()}" alt="${v.name}" /></div>`
+        )).join("");
+        document.querySelectorAll(".visual-thumb").forEach(img => {
+          img.addEventListener("click", () => openLightbox(img.dataset.full, img.alt));
+        });
+      }
     }
 
     function clearResults() {
@@ -244,6 +377,7 @@
       renderTable("hourlyTable", []);
       renderTable("monthlyTable", []);
       renderTable("complaintsTable", []);
+      document.getElementById("visualsGrid").innerHTML = "<p>No data.</p>";
 
       Object.values(state.charts).forEach(chart => chart.destroy());
       state.charts = {};
@@ -256,12 +390,17 @@
     }
 
     async function runPipeline(actionLabel = "Running scripts... this can take a few minutes.") {
-      const date = document.getElementById("startDate").value;
+      const startDate = document.getElementById("startDate").value;
+      const endDate = document.getElementById("endDate").value;
       const status = document.getElementById("status");
       const refreshBtn = document.getElementById("refreshBtn");
 
-      if (!date) {
-        status.textContent = "Please select a date.";
+      if (!startDate || !endDate) {
+        status.textContent = "Please select both start and end dates.";
+        return;
+      }
+      if (startDate > endDate) {
+        status.textContent = "Start date must be on or before end date.";
         return;
       }
 
@@ -272,7 +411,7 @@
         const resp = await fetch("/api/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ start_date: date })
+          body: JSON.stringify({ start_date: startDate, end_date: endDate })
         });
         const data = await resp.json();
 
@@ -290,13 +429,29 @@
       }
     }
 
-    document.getElementById("refreshBtn").addEventListener("click", () => runPipeline("Refreshing by rerunning for selected date..."));
+    document.getElementById("refreshBtn").addEventListener("click", () => runPipeline("Refreshing by rerunning for selected date range..."));
+    document.getElementById("topNSelect").addEventListener("change", () => {
+      if (state.lastPayload) renderResults(state.lastPayload);
+    });
     document.getElementById("startDate").addEventListener("change", () => {
-      runPipeline("Date changed. Running for selected date...");
+      if (document.getElementById("endDate").value) runPipeline("Date changed. Running for selected date range...");
+    });
+    document.getElementById("endDate").addEventListener("change", () => {
+      if (document.getElementById("startDate").value) runPipeline("Date changed. Running for selected date range...");
     });
 
     document.getElementById("startDate").value = "";
+    document.getElementById("endDate").value = "";
     clearResults();
+
+    lightboxClose.addEventListener("click", closeLightbox);
+    lightbox.addEventListener("click", (e) => {
+      if (e.target === lightbox) closeLightbox();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && lightbox.classList.contains("open")) closeLightbox();
+    });
   </script>
 </body>
 </html>
+
