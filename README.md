@@ -107,3 +107,5 @@ cd C:\Users\komak\OneDrive\Documents\GitHub\NYC-311-Service-Requests
 Then:
 - Open only `http://127.0.0.1:5000`
 - Hard refresh with `Ctrl+F5`
+## Note
+My contributions: Data collection, cleaning pipeline, API integration.
